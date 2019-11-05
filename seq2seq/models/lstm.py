@@ -6,7 +6,6 @@ from seq2seq import utils
 from seq2seq.models import Seq2SeqModel, Seq2SeqEncoder, Seq2SeqDecoder
 from seq2seq.models import register_model, register_model_architecture
 
-
 @register_model('lstm')
 class LSTMModel(Seq2SeqModel):
     """ Defines the sequence-to-sequence model class. """
@@ -55,7 +54,7 @@ class LSTMModel(Seq2SeqModel):
                               embed_dim=args.encoder_embed_dim,
                               hidden_size=args.encoder_hidden_size,
                               num_layers=args.encoder_num_layers,
-                              bidirectional=args.encoder_bidirectional,
+                              bidirectional=bool(args.encoder_bidirectional),
                               dropout_in=args.encoder_dropout_in,
                               dropout_out=args.encoder_dropout_out,
                               pretrained_embedding=encoder_pretrained_embedding)
@@ -249,6 +248,10 @@ class LSTMDecoder(Seq2SeqDecoder):
             tgt_cell_states = [torch.zeros(tgt_inputs.size()[0], self.hidden_size) for i in range(len(self.layers))]
             input_feed = tgt_embeddings.data.new(batch_size, self.hidden_size).zero_()
 
+        if self.layers[0].weight_ih.is_cuda:
+            tgt_hidden_states = utils.move_to_cuda(tgt_hidden_states)
+            tgt_cell_states = utils.move_to_cuda(tgt_cell_states)
+
         # Initialize attention output node
         attn_weights = tgt_embeddings.data.new(batch_size, tgt_time_steps, src_time_steps).zero_()
         rnn_outputs = []
@@ -308,19 +311,19 @@ class LSTMDecoder(Seq2SeqDecoder):
 
 @register_model_architecture('lstm', 'lstm')
 def base_architecture(args):
-    args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 64)
+    args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 128)
     args.encoder_embed_path = getattr(args, 'encoder_embed_path', None)
-    args.encoder_hidden_size = getattr(args, 'encoder_hidden_size', 64)
+    args.encoder_hidden_size = getattr(args, 'encoder_hidden_size', 128)
     args.encoder_num_layers = getattr(args, 'encoder_num_layers', 1)
     args.encoder_bidirectional = getattr(args, 'encoder_bidirectional', 'True')
     args.encoder_dropout_in = getattr(args, 'encoder_dropout_in', 0.25)
-    args.encoder_dropout_out = getattr(args, 'encoder_dropout_out', 0.25)
+    args.encoder_dropout_out = getattr(args, 'encoder_dropout_out', 0.5)
 
-    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 64)
+    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 128)
     args.decoder_embed_path = getattr(args, 'decoder_embed_path', None)
-    args.decoder_hidden_size = getattr(args, 'decoder_hidden_size', 128)
+    args.decoder_hidden_size = getattr(args, 'decoder_hidden_size', 256)
     args.decoder_num_layers = getattr(args, 'decoder_num_layers', 1)
-    args.decoder_dropout_in = getattr(args, 'decoder_dropout_in', 0.25)
+    args.decoder_dropout_in = getattr(args, 'decoder_dropout_in', 0.5)
     args.decoder_dropout_out = getattr(args, 'decoder_dropout_out', 0.25)
     args.decoder_use_attention = getattr(args, 'decoder_use_attention', 'True')
     args.decoder_use_lexical_model = getattr(args, 'decoder_use_lexical_model', 'False')

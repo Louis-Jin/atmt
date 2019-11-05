@@ -17,14 +17,14 @@ from seq2seq.models import ARCH_MODEL_REGISTRY, ARCH_CONFIG_REGISTRY
 def get_args():
     """ Defines training-specific hyper-parameters. """
     parser = argparse.ArgumentParser('Sequence to Sequence Model')
-    parser.add_argument('--cuda', default=False, help='Use a GPU')
+    parser.add_argument('--cuda', default=True, help='Use a GPU')
 
     # Add data arguments
-    parser.add_argument('--data', default='indomain/prepared_data', help='path to data directory')
+    parser.add_argument('--data', default='baseline/prepared_data', help='path to data directory')
     parser.add_argument('--source-lang', default='de', help='source language')
     parser.add_argument('--target-lang', default='en', help='target language')
     parser.add_argument('--max-tokens', default=None, type=int, help='maximum number of tokens in a batch')
-    parser.add_argument('--batch-size', default=1, type=int, help='maximum number of sentences in a batch')
+    parser.add_argument('--batch-size', default=100, type=int, help='maximum number of sentences in a batch')
     parser.add_argument('--train-on-tiny', action='store_true', help='train model on a tiny dataset')
 
     # Add model arguments
@@ -41,6 +41,7 @@ def get_args():
     parser.add_argument('--log-file', default=None, help='path to save logs')
     parser.add_argument('--save-dir', default='checkpoints', help='path to save checkpoints')
     parser.add_argument('--restore-file', default='checkpoint_last.pt', help='filename to load checkpoint')
+    parser.add_argument('--restore-file-rev', default='checkpoint_last_rev.pt', help='filename to load checkpoint')
     parser.add_argument('--save-interval', type=int, default=1, help='save a checkpoint every N epochs')
     parser.add_argument('--no-save', action='store_true', help='don\'t save models or checkpoints')
     parser.add_argument('--epoch-checkpoints', action='store_true', help='store all epoch checkpoints')
@@ -53,6 +54,32 @@ def get_args():
     ARCH_CONFIG_REGISTRY[args.arch](args)
     return args
 
+def get_diff(att, src_out, att_rev, src_out_rev):
+    def calculate_diff(acontext, src_out_other):
+        src_out_other = src_out_other.transpose(1, 2)
+        diff = torch.bmm(acontext, src_out_other)
+        diag = torch.diagonal(diff, dim1=1, dim2=2)
+        numerator = torch.norm(diag, p=1)/len(diag)
+        diff = diff.view(-1)
+        denominator = (torch.norm(diff, p=1) - torch.norm(diag, p=1))/(len(diff) - len(diag))
+        return numerator/denominator
+    src_out = src_out.transpose(0, 1)
+    src_out_rev = src_out_rev.transpose(0, 1)
+    acontext = torch.bmm(att, src_out)
+    acontext_rev = torch.bmm(att_rev, src_out_rev)
+    
+    d = calculate_diff(acontext, src_out_rev)
+    d_rev = calculate_diff(acontext_rev, src_out)
+
+    # print(d.cpu().detach().numpy())
+    d=d.cpu().detach().numpy()
+    d=torch.from_numpy(d)
+
+    d_rev=d_rev.cpu().detach().numpy()
+    d_rev=torch.from_numpy(d_rev)
+    # print(src_out)
+    # print(att2)
+    return d, d_rev
 
 def main(args):
     """ Main training function. Trains the translation model over the course of several epochs, including dynamic
@@ -81,10 +108,13 @@ def main(args):
 
     # Build model and optimization criterion
     model = models.build_model(args, src_dict, tgt_dict)
+    model_rev = models.build_model(args, tgt_dict, src_dict)
     logging.info('Built a model with {:d} parameters'.format(sum(p.numel() for p in model.parameters())))
     criterion = nn.CrossEntropyLoss(ignore_index=src_dict.pad_idx, reduction='sum')
+    criterion2 = nn.MSELoss(reduction='sum')
     if args.cuda:
         model = model.cuda()
+        model_rev = model_rev.cuda()
         criterion = criterion.cuda()
 
     # Instantiate optimizer and learning rate scheduler
@@ -92,6 +122,7 @@ def main(args):
 
     # Load last checkpoint if one exists
     state_dict = utils.load_checkpoint(args, model, optimizer)  # lr_scheduler
+    utils.load_checkpoint_rev(args, model_rev, optimizer)  # lr_scheduler
     last_epoch = state_dict['last_epoch'] if state_dict is not None else -1
 
     # Track validation performance for early stopping
@@ -104,6 +135,7 @@ def main(args):
                                         batch_sampler=BatchSampler(train_dataset, args.max_tokens, args.batch_size, 1,
                                                                    0, shuffle=True, seed=42))
         model.train()
+        model_rev.train()
         stats = OrderedDict()
         stats['loss'] = 0
         stats['lr'] = 0
@@ -122,17 +154,62 @@ def main(args):
                 continue
             model.train()
 
-            output, _ = model(sample['src_tokens'], sample['src_lengths'], sample['tgt_inputs'])
+            (output, att), src_out = model(sample['src_tokens'], sample['src_lengths'], sample['tgt_inputs'])
+            # print(sample['src_lengths'])
+            # print(sample['tgt_inputs'].size())
+            # print(sample['src_tokens'].size())
+            src_inputs = sample['src_tokens'].clone()
+            src_inputs[0,1:src_inputs.size(1)] = sample['src_tokens'][0,0:(src_inputs.size(1)-1)]
+            src_inputs[0,0] = sample['src_tokens'][0,src_inputs.size(1)-1]
+            tgt_lengths = sample['src_lengths'].clone()#torch.tensor([sample['tgt_tokens'].size(1)])
+            tgt_lengths += sample['tgt_inputs'].size(1) - sample['src_tokens'].size(1)
+            # print(tgt_lengths)
+            # print(sample['num_tokens'])
+            
+            # if args.cuda:
+            #     tgt_lengths = tgt_lengths.cuda()
+            (output_rev, att_rev), src_out_rev = model_rev(sample['tgt_tokens'], tgt_lengths, src_inputs)
+
+            # notice that those are without masks already
+            # print(sample['tgt_tokens'].view(-1))
+            d, d_rev = get_diff(att, src_out, att_rev, src_out_rev)
+            
+            # print(sample['src_tokens'].size())
+            # print(sample['tgt_inputs'].size())
+            # print(att.size())
+            # print(src_out.size())
+            # print(acontext.size())
+            # print(src_out_rev.size())
+            # # print(sample['tgt_inputs'].dtype)
+            # # print(sample['src_lengths'])
+            # # print(sample['src_tokens'])
+            # # print('output %s' % str(output.size()))
+            # # print(att)
+            # # print(len(sample['src_lengths']))
+            # print(d)
+            # print(d_rev)
+            # print(criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) / len(sample['src_lengths']))
+            # print(att2)
+            # output=output.cpu().detach().numpy()
+            # output=torch.from_numpy(output).cuda()
+            # output_rev=output_rev.cpu().detach().numpy()
+            # output_rev=torch.from_numpy(output_rev).cuda()
             loss = \
-                criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) / len(sample['src_lengths'])
+                criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) / len(sample['src_lengths'])  + d +\
+                criterion(output_rev.view(-1, output_rev.size(-1)), sample['src_tokens'].view(-1)) / len(tgt_lengths) +d_rev
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
+            # loss_rev = \
+            #     criterion(output_rev.view(-1, output_rev.size(-1)), sample['src_tokens'].view(-1)) / len(tgt_lengths) 
+            # loss_rev.backward()
+            # grad_norm_rev = torch.nn.utils.clip_grad_norm_(model_rev.parameters(), args.clip_norm)
             optimizer.step()
             optimizer.zero_grad()
 
             # Update statistics for progress bar
-            total_loss, num_tokens, batch_size = loss.item(), sample['num_tokens'], len(sample['src_tokens'])
+            total_loss, num_tokens, batch_size = (loss-d-d_rev).item(), sample['num_tokens'], len(sample['src_tokens'])
             stats['loss'] += total_loss * len(sample['src_lengths']) / sample['num_tokens']
+            # stats['loss_rev'] += loss_rev.item() * len(sample['src_lengths']) / sample['src_tokens'].size(0) / sample['src_tokens'].size(1)
             stats['lr'] += optimizer.param_groups[0]['lr']
             stats['num_tokens'] += num_tokens / len(sample['src_tokens'])
             stats['batch_size'] += batch_size
@@ -145,12 +222,13 @@ def main(args):
             value / len(progress_bar)) for key, value in stats.items())))
 
         # Calculate validation loss
-        valid_perplexity = validate(args, model, criterion, valid_dataset, epoch)
+        valid_perplexity = validate(args, model, model_rev, criterion, valid_dataset, epoch)
         model.train()
+        model_rev.train()
 
         # Save checkpoints
         if epoch % args.save_interval == 0:
-            utils.save_checkpoint(args, model, optimizer, epoch, valid_perplexity)  # lr_scheduler
+            utils.save_checkpoint(args, model, model_rev, optimizer, epoch, valid_perplexity)  # lr_scheduler
 
         # Check whether to terminate training
         if valid_perplexity < best_validate:
@@ -163,13 +241,14 @@ def main(args):
             break
 
 
-def validate(args, model, criterion, valid_dataset, epoch):
+def validate(args, model, model_rev, criterion, valid_dataset, epoch):
     """ Validates model performance on a held-out development set. """
     valid_loader = \
         torch.utils.data.DataLoader(valid_dataset, num_workers=1, collate_fn=valid_dataset.collater,
                                     batch_sampler=BatchSampler(valid_dataset, args.max_tokens, args.batch_size, 1, 0,
                                                                shuffle=False, seed=42))
     model.eval()
+    model_rev.eval()
     stats = OrderedDict()
     stats['valid_loss'] = 0
     stats['num_tokens'] = 0
@@ -183,8 +262,18 @@ def validate(args, model, criterion, valid_dataset, epoch):
             continue
         with torch.no_grad():
             # Compute loss
-            output, attn_scores = model(sample['src_tokens'], sample['src_lengths'], sample['tgt_inputs'])
-            loss = criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1))
+            (output, attn_scores), src_out = model(sample['src_tokens'], sample['src_lengths'], sample['tgt_inputs'])
+            
+            src_inputs = sample['src_tokens'].clone()
+            src_inputs[0,1:src_inputs.size(1)] = sample['src_tokens'][0,0:(src_inputs.size(1)-1)]
+            src_inputs[0,0] = sample['src_tokens'][0,src_inputs.size(1)-1]
+            tgt_lengths = sample['src_lengths'].clone()#torch.tensor([sample['tgt_tokens'].size(1)])
+            tgt_lengths += sample['tgt_inputs'].size(1) - sample['src_tokens'].size(1)
+            (output_rev, attn_scores_rev), src_out_rev = model_rev(sample['tgt_tokens'], tgt_lengths, src_inputs)
+
+            d, d_rev = get_diff(attn_scores, src_out, attn_scores_rev, src_out_rev)
+            loss = criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) + d + \
+                criterion(output_rev.view(-1, output_rev.size(-1)), sample['src_tokens'].view(-1)) / len(tgt_lengths) + d_rev
         # Update tracked statistics
         stats['valid_loss'] += loss.item()
         stats['num_tokens'] += sample['num_tokens']
@@ -203,6 +292,7 @@ def validate(args, model, criterion, valid_dataset, epoch):
 
 
 if __name__ == '__main__':
+    # torch.backends.cudnn.enabled = False
     args = get_args()
     args.device_id = 0
 

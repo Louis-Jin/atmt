@@ -21,8 +21,9 @@ class Seq2SeqModel(nn.Module):
 
     def forward(self, src_tokens, src_lengths, tgt_inputs):
         encoder_out = self.encoder(src_tokens, src_lengths)
+        src_out, _, _ = encoder_out['src_out']
         decoder_out = self.decoder(tgt_inputs, encoder_out)
-        return decoder_out
+        return decoder_out, src_out
 
 
 class Seq2SeqEncoder(nn.Module):
