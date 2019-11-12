@@ -38,6 +38,31 @@ def move_to_cuda(sample):
     else:
         return sample
 
+def save_checkpoint_before(args, model, optimizer, epoch, valid_loss):
+    os.makedirs(args.save_dir, exist_ok=True)
+    last_epoch = getattr(save_checkpoint, 'last_epoch', -1)
+    save_checkpoint.last_epoch = max(last_epoch, epoch)
+    prev_best = getattr(save_checkpoint, 'best_loss', float('inf'))
+    save_checkpoint.best_loss = min(prev_best, valid_loss)
+
+    state_dict = {
+        'epoch': epoch,
+        'val_loss': valid_loss,
+        'best_loss': save_checkpoint.best_loss,
+        'last_epoch': save_checkpoint.last_epoch,
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'args': args,
+    }
+
+
+    if args.epoch_checkpoints and epoch % args.save_interval == 0:
+        torch.save(state_dict, os.path.join(args.save_dir, 'checkpoint{}_{:.3f}.pt'.format(epoch, valid_loss)))
+    if valid_loss < prev_best:
+        torch.save(state_dict, os.path.join(args.save_dir, 'checkpoint_best.pt'))
+    if last_epoch < epoch:
+        torch.save(state_dict, os.path.join(args.save_dir, 'checkpoint_last.pt'))
+
 
 def save_checkpoint(args, model, model_rev, optimizer, epoch, valid_loss):
     os.makedirs(args.save_dir, exist_ok=True)
