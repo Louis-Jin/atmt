@@ -1,5 +1,6 @@
-# atmt code base
-Materials for the first assignment of "Advanced Techniques of Machine Translation".
-Please refer to the assignment sheet for instructions on how to use the toolkit.
+# atmt assignment 3
+We used pytorch 1.3 and cuda 10.1, runnable on Windows or Ubuntu machine with the two mentioned packages installed, or it can be run online on Google Colab.
+We trained three models
 
-The toolkit is based on [this implementation](https://github.com/demelin/nmt_toolkit).
+1. train1.py is for model 1 & 2
+2. train.py is for model 3
