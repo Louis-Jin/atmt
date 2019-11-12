@@ -97,9 +97,10 @@ def main(args):
     bad_epochs = 0
     best_validate = float('inf')
 
-    src_outs = []
+    # to analyze produced features further
+#    src_outs = []
 
-    for epoch in range(last_epoch + 1, last_epoch + 2):
+    for epoch in range(last_epoch + 1, args.max_epoch):
         train_loader = \
             torch.utils.data.DataLoader(train_dataset, num_workers=1, collate_fn=train_dataset.collater,
                                         batch_sampler=BatchSampler(train_dataset, args.max_tokens, args.batch_size, 1,
@@ -124,53 +125,22 @@ def main(args):
             model.train()
 
             (output, att), src_out = model(sample['src_tokens'], sample['src_lengths'], sample['tgt_inputs'])
-            # print(sample['src_lengths'])
-            # print(sample['tgt_inputs'].size())
-            # print(sample['src_tokens'].size())
+            
             src_inputs = sample['src_tokens'].clone()
             src_inputs[0,1:src_inputs.size(1)] = sample['src_tokens'][0,0:(src_inputs.size(1)-1)]
             src_inputs[0,0] = sample['src_tokens'][0,src_inputs.size(1)-1]
             tgt_lengths = sample['src_lengths'].clone()#torch.tensor([sample['tgt_tokens'].size(1)])
             tgt_lengths += sample['tgt_inputs'].size(1) - sample['src_tokens'].size(1)
-            # print(tgt_lengths)
-            # print(sample['num_tokens'])
             
-            # if args.cuda:
-            #     tgt_lengths = tgt_lengths.cuda()
+            # to analyze features further
+#            src_outs.append(src_out.cpu().detach().numpy())
 
-            # notice that those are without masks already
-            # print(sample['tgt_tokens'].view(-1))
-            src_outs.append(src_out.cpu().detach().numpy())
-            # print(sample['src_tokens'].size())
-            # print(sample['tgt_inputs'].size())
-            # print(att.size())
-            # print(src_out.size())
-            # print(acontext.size())
-            # print(src_out_rev.size())
-            # # print(sample['tgt_inputs'].dtype)
-            # # print(sample['src_lengths'])
-            # # print(sample['src_tokens'])
-            # # print('output %s' % str(output.size()))
-            # # print(att)
-            # # print(len(sample['src_lengths']))
-            # print(d)
-            # print(d_rev)
-            # print(criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) / len(sample['src_lengths']))
-            # print(att2)
-            # output=output.cpu().detach().numpy()
-            # output=torch.from_numpy(output).cuda()
-            # output_rev=output_rev.cpu().detach().numpy()
-            # output_rev=torch.from_numpy(output_rev).cuda()
             loss = \
                 criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) / len(sample['src_lengths'])
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
 
 
-            # loss_rev = \
-            #     criterion(output_rev.view(-1, output_rev.size(-1)), sample['src_tokens'].view(-1)) / len(tgt_lengths) 
-            # loss_rev.backward()
-            # grad_norm_rev = torch.nn.utils.clip_grad_norm_(model_rev.parameters(), args.clip_norm)
             optimizer.step()  
             optimizer.zero_grad()
 
@@ -184,8 +154,9 @@ def main(args):
             stats['clip'] += 1 if grad_norm > args.clip_norm else 0
             progress_bar.set_postfix({key: '{:.4g}'.format(value / (i + 1)) for key, value in stats.items()},
                                      refresh=True)
-        feature_path = "features_tr"
-        np.save(feature_path, src_outs)
+        # to analyze produced features further
+#        feature_path = "features_tr"
+#        np.save(feature_path, src_outs)
 
         logging.info('Epoch {:03d}: {}'.format(epoch, ' | '.join(key + ' {:.4g}'.format(
             value / len(progress_bar)) for key, value in stats.items())))

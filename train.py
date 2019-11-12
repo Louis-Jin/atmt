@@ -17,7 +17,7 @@ from seq2seq.models import ARCH_MODEL_REGISTRY, ARCH_CONFIG_REGISTRY
 def get_args():
     """ Defines training-specific hyper-parameters. """
     parser = argparse.ArgumentParser('Sequence to Sequence Model')
-    parser.add_argument('--cuda', default=True, help='Use a GPU')
+    parser.add_argument('--cuda', default=False, help='Use a GPU')
 
     # Add data arguments
     parser.add_argument('--data', default='baseline/prepared_data', help='path to data directory')
@@ -71,13 +71,6 @@ def get_diff(att, src_out, att_rev, src_out_rev):
     d = calculate_diff(acontext, src_out_rev)
     d_rev = calculate_diff(acontext_rev, src_out)
 
-    # # print(d.cpu().detach().numpy())
-    # d2=d.cpu().detach().numpy()
-    # d2=torch.from_numpy(d2)
-
-    # d_rev2=d_rev.cpu().detach().numpy()
-    # d_rev2=torch.from_numpy(d_rev2)
-
     return d, d_rev
 
 def main(args):
@@ -127,11 +120,12 @@ def main(args):
     bad_epochs = 0
     best_validate = float('inf')
 
-    src_outs = []
-    ds = []
-    d_revs = []
+    # to produce features for analysis
+#    src_outs = []
+#    ds = []
+#    d_revs = []
 
-    for epoch in range(last_epoch + 1, last_epoch + 2):
+    for epoch in range(last_epoch + 1, args.max_epoch):
         train_loader = \
             torch.utils.data.DataLoader(train_dataset, num_workers=1, collate_fn=train_dataset.collater,
                                         batch_sampler=BatchSampler(train_dataset, args.max_tokens, args.batch_size, 1,
@@ -157,66 +151,35 @@ def main(args):
             model.train()
 
             (output, att), src_out = model(sample['src_tokens'], sample['src_lengths'], sample['tgt_inputs'])
-            # print(sample['src_lengths'])
-            # print(sample['tgt_inputs'].size())
-            # print(sample['src_tokens'].size())
+
             src_inputs = sample['src_tokens'].clone()
             src_inputs[0,1:src_inputs.size(1)] = sample['src_tokens'][0,0:(src_inputs.size(1)-1)]
             src_inputs[0,0] = sample['src_tokens'][0,src_inputs.size(1)-1]
             tgt_lengths = sample['src_lengths'].clone()#torch.tensor([sample['tgt_tokens'].size(1)])
             tgt_lengths += sample['tgt_inputs'].size(1) - sample['src_tokens'].size(1)
-            # print(tgt_lengths)
-            # print(sample['num_tokens'])
-            
-            # if args.cuda:
-            #     tgt_lengths = tgt_lengths.cuda()
+
             (output_rev, att_rev), src_out_rev = model_rev(sample['tgt_tokens'], tgt_lengths, src_inputs)
 
             # notice that those are without masks already
             # print(sample['tgt_tokens'].view(-1))
             d, d_rev = get_diff(att, src_out, att_rev, src_out_rev)
-            src_outs.append(src_out.cpu().detach().numpy())
-            ds.append(d.cpu().detach().numpy())
-            d_revs.append(d_rev.cpu().detach().numpy())
+            # to produce features for analysis
+#            src_outs.append(src_out.cpu().detach().numpy())
+#            ds.append(d.cpu().detach().numpy())
+#            d_revs.append(d_rev.cpu().detach().numpy())
 
-            # print(sample['src_tokens'].size())
-            # print(sample['tgt_inputs'].size())
-            # print(att.size())
-            # print(src_out.size())
-            # print(acontext.size())
-            # print(src_out_rev.size())
-            # # print(sample['tgt_inputs'].dtype)
-            # # print(sample['src_lengths'])
-            # # print(sample['src_tokens'])
-            # # print('output %s' % str(output.size()))
-            # # print(att)
-            # # print(len(sample['src_lengths']))
-            # print(d)
-            # print(d_rev)
-            # print(criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) / len(sample['src_lengths']))
-            # print(att2)
-            # output=output.cpu().detach().numpy()
-            # output=torch.from_numpy(output).cuda()
-            # output_rev=output_rev.cpu().detach().numpy()
-            # output_rev=torch.from_numpy(output_rev).cuda()
             loss = \
                 criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) / len(sample['src_lengths'])  + d +\
                 criterion(output_rev.view(-1, output_rev.size(-1)), sample['src_tokens'].view(-1)) / len(tgt_lengths) +d_rev
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
 
-
-            # loss_rev = \
-            #     criterion(output_rev.view(-1, output_rev.size(-1)), sample['src_tokens'].view(-1)) / len(tgt_lengths) 
-            # loss_rev.backward()
-            # grad_norm_rev = torch.nn.utils.clip_grad_norm_(model_rev.parameters(), args.clip_norm)
-            optimizer.step()  
+            optimizer.step()
             optimizer.zero_grad()
 
             # Update statistics for progress bar
-            total_loss, num_tokens, batch_size = (loss-d-d_rev).item(), sample['num_tokens'], len(sample['src_tokens'])
+            total_loss, num_tokens, batch_size = loss.item(), sample['num_tokens'], len(sample['src_tokens'])
             stats['loss'] += total_loss * len(sample['src_lengths']) / sample['num_tokens']
-            # stats['loss_rev'] += loss_rev.item() * len(sample['src_lengths']) / sample['src_tokens'].size(0) / sample['src_tokens'].size(1)
             stats['lr'] += optimizer.param_groups[0]['lr']
             stats['num_tokens'] += num_tokens / len(sample['src_tokens'])
             stats['batch_size'] += batch_size
@@ -224,12 +187,14 @@ def main(args):
             stats['clip'] += 1 if grad_norm > args.clip_norm else 0
             progress_bar.set_postfix({key: '{:.4g}'.format(value / (i + 1)) for key, value in stats.items()},
                                      refresh=True)
-        feature_path = "features_tr"
-        np.save(feature_path, src_outs)
-        d_path = "d_tr"
-        np.save(d_path, ds)
-        d_rev_path = "d_rev_tr"
-        np.save(d_rev_path, d_revs)
+
+        # to produce features for analysis
+#        feature_path = "features"
+#        np.save(feature_path, src_outs)
+#        d_path = "d"
+#        np.save(d_path, ds)
+#        d_rev_path = "d_rev"
+#        np.save(d_rev_path, d_revs)
 
         logging.info('Epoch {:03d}: {}'.format(epoch, ' | '.join(key + ' {:.4g}'.format(
             value / len(progress_bar)) for key, value in stats.items())))
