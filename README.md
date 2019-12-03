@@ -1,3 +1,21 @@
+# atmt assignment 4
+
+## to run the code
+Run part04.sh for all predictions. Then plot with part01_plot.ipynb, plot03.py and plot04.py
+
+## Implementation
+
+### Part 03
+Inside ‘get_best’ function in beam.py. 
+
+For all the potential predictions, recalculate their probabilities by adding length normalization.
+
+### Part 04
+Inside translate_beam.py, annotated with ‘Part 04’
+
+Since there is no need to add diversity at the first layer of the search tree, I recalculated the probability only for nodes at deeper layers, as long as that node is not a final node. And since the penalty is only used for selecting nodes across same layer, it should not be stored as the log probability. Otherwise the longer a prediction is, more severely it will be penalized. 
+
+
 # atmt assignment 3
 
 ## to run the code
