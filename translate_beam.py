@@ -20,8 +20,8 @@ def get_args():
     parser.add_argument('--seed', default=42, type=int, help='pseudo random number generator seed')
 
     # Add data arguments
-    parser.add_argument('--data', default='indomain/prepared_data', help='path to data directory')
-    parser.add_argument('--checkpoint-path', default='checkpoints/checkpoint_best.pt', help='path to the model file')
+    parser.add_argument('--data', default='data_asg4/prepared_data', help='path to data directory')
+    parser.add_argument('--checkpoint-path', default='checkpoints_asg4/checkpoint_best.pt', help='path to the model file')
     parser.add_argument('--batch-size', default=None, type=int, help='maximum number of sentences in a batch')
     parser.add_argument('--output', default='model_translations.txt', type=str,
                         help='path to the output file destination')
@@ -29,6 +29,13 @@ def get_args():
 
     # Add beam search arguments
     parser.add_argument('--beam-size', default=5, type=int, help='number of hypotheses expanded in beam search')
+    # alpha = alpha-i/alpha-max
+    parser.add_argument('--alpha-i', default=0, type=int, help='alpha parameter for length normalization')
+    parser.add_argument('--alpha-max', default=10, type=int, help='alpha parameter for length normalization')
+    # gamma = gamma-i/gamma-max
+    parser.add_argument('--gamma-i', default=0, type=int, help='alpha parameter for length normalization')
+    parser.add_argument('--gamma-max', default=10, type=int, help='alpha parameter for length normalization')
+
 
     return parser.parse_args()
 
@@ -74,7 +81,7 @@ def main(args):
 
         # Create a beam search object or every input sentence in batch
         batch_size = sample['src_tokens'].shape[0]
-        searches = [BeamSearch(args.beam_size, args.max_len - 1, tgt_dict.unk_idx) for i in range(batch_size)]
+        searches = [BeamSearch(args.beam_size, args.max_len - 1, tgt_dict.unk_idx, args.alpha_i/args.alpha_max) for i in range(batch_size)]
 
         with torch.no_grad():
             # Compute the encoder output
@@ -156,6 +163,7 @@ def main(args):
                     log_p = torch.where(best_candidate == tgt_dict.unk_idx, backoff_log_p, best_log_p)
                     log_p = log_p[-1]
                     next_word = torch.cat((prev_words[i][1:], next_word[-1:]))
+                    
 
                     # Get parent node and beam search object for corresponding sentence
                     node = nodes[i]
@@ -175,7 +183,9 @@ def main(args):
                         node = BeamSearchNode(search, node.emb, node.lstm_out, node.final_hidden,
                                               node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
                                               next_word)), node.logp + log_p, node.length + 1)
-                        search.add(-node.eval(), node)
+                        # for Part 04
+                        diversity_penalty = j*args.gamma_i/args.gamma_max
+                        search.add(-node.eval()+diversity_penalty, node)
 
             # __QUESTION 5: What happens internally when we prune our beams?
             # How do we know we always maintain the best sequences?
