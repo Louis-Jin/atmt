@@ -1,0 +1,5 @@
+batch_size, 100
+encoder_dropout_in, 0.25
+encoder_dropout_out, 0.5
+decoder_dropout_in, 0.5
+decoder_dropout_out, 0.25

@@ -19,10 +19,10 @@ def get_args():
     parser.add_argument('--seed', default=42, type=int, help='pseudo random number generator seed')
 
     # Add data arguments
-    parser.add_argument('--data', default='indomain/prepared_data', help='path to data directory')
+    parser.add_argument('--data', default='baseline/prepared_data', help='path to data directory')
     parser.add_argument('--checkpoint-path', default='checkpoints/checkpoint_best.pt', help='path to the model file')
     parser.add_argument('--batch-size', default=None, type=int, help='maximum number of sentences in a batch')
-    parser.add_argument('--output', default='model_translations.txt', type=str,
+    parser.add_argument('--output', default='model_translations_baseline.txt', type=str,
                         help='path to the output file destination')
     parser.add_argument('--max-len', default=25, type=int, help='maximum length of generated sequence')
 
@@ -38,6 +38,9 @@ def main(args):
     args_loaded.data = args.data
     args = args_loaded
     utils.init_logging(args)
+    # loading may set cuda to true
+    args.cuda = False
+    args.batch_size = 100
 
     # Load dictionaries
     src_dict = Dictionary.load(os.path.join(args.data, 'dict.{:s}'.format(args.source_lang)))
@@ -65,11 +68,16 @@ def main(args):
     progress_bar = tqdm(test_loader, desc='| Generation', leave=False)
 
     # Iterate over the test set
+    src_outs = []
     all_hyps = {}
     for i, sample in enumerate(progress_bar):
         with torch.no_grad():
             # Compute the encoder output
             encoder_out = model.encoder(sample['src_tokens'], sample['src_lengths'])
+            # get output features
+            src_out, _, _ = encoder_out['src_out']
+            src_outs.append(src_out.cpu().detach().numpy())
+            
             go_slice = \
                 torch.ones(sample['src_tokens'].shape[0], 1).fill_(tgt_dict.eos_idx).type_as(sample['src_tokens'])
             prev_words = go_slice
@@ -108,6 +116,9 @@ def main(args):
         assert(len(output_sentences) == len(sample['id'].data))
         for ii, sent in enumerate(output_sentences):
             all_hyps[int(sample['id'].data[ii])] = sent
+    
+    feature_path = "features_baseline"
+    np.save(feature_path, src_outs)
 
     # Write to file
     if args.output is not None:
